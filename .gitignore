@@ -1,2 +1,4 @@
 __pycache__
 sessions/
+.env
+.mypy*

@@ -1,3 +1,6 @@
 ollama
-json
 requests
+python-dotenv
+flake8
+autopep8
+mypy
