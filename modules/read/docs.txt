@@ -1,7 +1,5 @@
 The read function enables agents to read local files on the machine.
 
-You must use this function if a user asks you do something involving reading a named file.
-
-The syntax for a read command is: {"cmd": "read", "args": ["FILE_NAME_HERE"]}
+The syntax for a read command is: SUPER{"cmd": "read", "args": ["FILE_NAME_HERE"]}
 
 The syntax for returned data is {"return": "FILE_CONTENT_HERE"}
