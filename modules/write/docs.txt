@@ -1,5 +1,0 @@
-The write function enables agents to write files to the local machine.
-
-The syntax for a write command is: SUPER{"cmd": "write", "args": ["FILE_NAME_HERE", "DATA_HERE"]}
-
-The syntax for returned data is an empty struct: {}

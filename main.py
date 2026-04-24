@@ -1,91 +1,132 @@
-import ollama
-import os
-import json
-import re
-import time
-import importlib
 from dotenv import load_dotenv
-
 load_dotenv()
 
-llm_host = os.getenv("LLM_HOST")
-message_history = []
-modules = {}
+from ollama import chat
+import importlib
+import os
+import json
+import httpx
+
+messages = []
+tool_lib = {}
 
 
-def process_agentic_command(cmd: dict):
-    effect = modules[cmd["cmd"]](*cmd["args"])
-
-    if effect is None:
-        return {}
-    else:
-        # have faith that user modules return the format in the docs, or that
-        # the llm can interpret it
-        return {"return": effect}
+# original_send = httpx.Client.send
 
 
-def stream_ollama_response(
-        prompt: str, model: str = "huihui_ai/gpt-oss-abliterated:20b"):
-    message_history.append({'role': 'user', 'content': prompt})
-    ollama_server = ollama.Client(host=llm_host)
-    stream = ollama_server.chat(
-        model=model,
-        messages=message_history,
-        stream=True)
+# def send_and_log(self, request, **kwargs):
+#     print("=== OLLAMA REQUEST ===")
+#     body = request.content.decode("utf-8")
+#     print("\x1b[38;5;14m" + json.dumps(json.loads(body), indent=2), "\x1b[0m")
+#     print("=====================")
+#     return original_send(self, request, **kwargs)
 
-    reply = ''
-    for chunk in stream:
-        if 'message' in chunk and 'content' in chunk['message']:
-            delta = chunk['message']['content']
-            print(delta, end='', flush=True)
-            reply += delta
 
-        elif 'response' in chunk:
-            print(chunk['respond'])
+# httpx.Client.send = send_and_log
 
-    print('\n')
 
-    message_history.append({'role': 'assistant', 'content': reply})
+def main():
+    # load tools
+    for filename in os.listdir("tools"):
+        if filename.endswith(".py") and filename != "__init__.py":
+            # print(filename)
+            module_name = filename[:-3]  # strip .py
+            # print(module_name)
+            module = importlib.import_module("tools." + module_name)
+            # print(module)
+            # print()
 
-    return reply
+            for name in getattr(module, "__all__", []):
+                # print(module, "- ", name)
+                # print(name)
+                tool_lib[name] = getattr(module, name)
+
+    condition = True
+    while condition:
+        messages.append({"role": "user", "content": input("> ")})
+
+        # print(json.dumps(messages, indent=4))
+        # exit()
+
+        if messages[-1]["content"].lower() == "quit":
+            condition = False
+            continue
+
+        if messages[-1]["content"].lower() == "stackdump":
+            print("\x1b[38;5;91m" + json.dumps(str(messages), indent=4) + "\x1b[0m")
+            continue
+
+        # print(json.dumps(messages, indent=2))
+
+        while True:
+            stream = chat(
+                # model="qwen3.5:4b",
+                # model="gemma4:e2b",
+                model="gemma4:e4b",
+                messages=messages,
+                tools=tool_lib.values(),
+                stream=True,
+                think=True,
+                # options={
+                #     "repeat_penalty": 1.35,
+                #     "repeat_last_n": 200,
+                #     "temperature": 0.4,
+                # }
+            )
+
+            thinking = ""
+            content = ""
+            tool_calls = []
+
+            done_thinking = False
+            # accumulate the partial fields
+            for chunk in stream:
+                if chunk.message.thinking:
+                    thinking += chunk.message.thinking
+                    print(
+                        "\x1b[2m" + chunk.message.thinking + "\x1b[0m",
+                        end="",
+                        flush=True,
+                    )
+
+                if chunk.message.content:
+                    if not done_thinking:
+                        done_thinking = True
+                        print("\n")
+                    content += chunk.message.content
+                    print(chunk.message.content, end="", flush=True)
+
+                if chunk.message.tool_calls:
+                    tool_calls.extend(chunk.message.tool_calls)
+                    print("\x1b[38;5;10m" + str(chunk.message.tool_calls) + "\x1b[0m")
+
+
+
+            # append accumulated fields to the messages
+            if thinking or content or tool_calls:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "thinking": thinking,
+                        "content": content,
+                        "tool_calls": tool_calls,
+                    }
+                )
+
+            # If no tool calls, we're done — break to get next user input
+            if not tool_calls:
+                break
+
+            for call in tool_calls:
+                if call.function.name in tool_lib:
+                    result = tool_lib[call.function.name](**call.function.arguments)
+
+                else:
+                    result = "Unknown tool"
+                messages.append(
+                    {"role": "tool", "tool_name": call.function.name, "content": result}
+                )
 
 
 if __name__ == "__main__":
-    docs = []
-
-    for d in os.scandir('modules'):
-        if (d.is_dir() and (d.name != '__pycache__')):
-            docs.append(open('modules/' + d.name + '/docs.txt').read())
-
-            # dynamically importing modules - assume module repo has same name
-            # as function - not suitable long term
-            module_path = "modules." + d.name + "." + d.name
-            function_name = d.name
-
-            mod = importlib.import_module(module_path)
-            func = getattr(mod, function_name)
-
-            modules[d.name] = func
-
-    # print(docs)
-
-    stream_ollama_response(open('prompt.txt').read() + '\n'.join(docs))
-
-    cnt = True
-    while cnt:
-        response = stream_ollama_response(input("Input: "))
-
-        super = re.search(r'SUPER\s*(\{.*?\})\s*$', response, re.DOTALL)
-        if super:
-            try:
-                process_agentic_command(json.loads(super.group(1)))
-
-            except json.JSONDecodeError:
-                print("MODEL PRODUCED BROKEN JSON")
-
-        exit = re.search(r'EXIT', response, re.DOTALL)
-        if exit:
-            cnt = False
-
-    with open('sessions/' + str(int(time.time())) + '.json', 'w') as file:
-        file.write(json.dumps(message_history, indent=2))
+    main()

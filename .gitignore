@@ -1,4 +1,16 @@
 __pycache__
 sessions/
 .env
+
 .mypy*
+.ruff*
+.venv
+.vscode
+
+trash/
+.python-version
+
+
+test.py
+stack.py
+.DS*
